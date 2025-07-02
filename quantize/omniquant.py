@@ -55,6 +55,7 @@ def omniquant(
     use_cache = model.config.use_cache
     model.config.use_cache = False
     is_llama = False
+    is_rwkv7 = False
     if "llama" in args.net.lower():
         is_llama = True
         layers = model.model.layers
@@ -95,6 +96,11 @@ def omniquant(
         model.model.embed_tokens = model.model.embed_tokens.to(dev)
         model.model.norm = model.model.norm.to(dev)
         layer_name_prefix = "model.layers"
+    elif 'rwkv' in args.net.lower():
+        is_rwkv7 = True
+        layers = model.model.layers
+        model.model.embeddings = model.model.embeddings.to(dev)
+        layer_name_prefix = "model.model.layers"
     else:
         raise ValueError("Only support for opt/llama/Llama-2/falcon/mixtral now")
     
@@ -109,6 +115,9 @@ def omniquant(
     inps = torch.zeros(
         (args.nsamples, lm.seqlen, model.config.hidden_size), dtype=dtype, device=dev
     )
+    inps_vfirst = torch.zeros(
+        (args.nsamples, lm.seqlen, model.config.hidden_size), dtype=dtype, device=dev
+    )
     cache = {"i": 0}
 
     # catch the first layer input
@@ -117,17 +126,22 @@ def omniquant(
             super().__init__()
             self.module = module
             self.is_llama = False
+            self.is_rwkv7 = False
 
         def forward(self, inp, **kwargs):
             inps[cache["i"]] = inp
-            cache["i"] += 1
             cache["attention_mask"] = kwargs["attention_mask"]
             if self.is_llama:
                 cache["position_ids"] = kwargs["position_ids"]
+            if self.is_rwkv7:
+                outputs = self.module(inp, **kwargs)
+                inps_vfirst[cache["i"]] = outputs[-1]
+            cache["i"] += 1
             raise ValueError
 
     layers[0] = Catcher(layers[0])
     layers[0].is_llama = is_llama
+    layers[0].is_rwkv7 = is_rwkv7
 
     with torch.no_grad():
         for batch in dataloader:
@@ -153,6 +167,8 @@ def omniquant(
             model.model.decoder.project_in = model.model.decoder.project_in.cpu()
     elif 'falcon' in args.model:
         model.transformer.word_embeddings =  model.transformer.word_embeddings.cpu()
+    elif 'rwkv' in args.net.lower():
+        model.model.embeddings = model.model.embeddings.cpu()
     else:
         raise ValueError("Only support for opt/llama/Llama-2/falcon/mixtral now")
     torch.cuda.empty_cache()
@@ -188,7 +204,7 @@ def omniquant(
         omni_parameters = {}
 
     
-    
+    print(f"layers: {layers[0]}")
     for i in range(len(layers)):
         logger.info(f"=== Start quantize layer {i} ===")
         layer = layers[i].to(dev)
@@ -197,6 +213,12 @@ def omniquant(
             qlayer = copy.deepcopy(layer)
             for name, module in qlayer.named_modules():
                 if isinstance(module,torch.nn.Linear) and not "gate" in name:       # do not quantize gate
+                    quantlinear = QuantLinear(module, args.weight_quant_params, args.act_quant_params)
+                    add_new_module(name, qlayer, quantlinear)    
+        elif 'rwkv' in args.net.lower():
+            qlayer = copy.deepcopy(layer)
+            for name, module in qlayer.named_modules():
+                if isinstance(module,torch.nn.Linear) and not "lora" in name:
                     quantlinear = QuantLinear(module, args.weight_quant_params, args.act_quant_params)
                     add_new_module(name, qlayer, quantlinear)    
         else:
@@ -210,9 +232,14 @@ def omniquant(
             with torch.no_grad():
                 with torch.cuda.amp.autocast():
                     for j in range(args.nsamples):
-                        fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
-                        if args.aug_loss:
-                            fp_inps_2[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
+                        if is_rwkv7:
+                            fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids, v_first=inps_vfirst[j])[0]
+                            if args.aug_loss:
+                                fp_inps_2[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids, v_first=inps_vfirst[j])[0]
+                        else:
+                            fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
+                            if args.aug_loss:
+                                fp_inps_2[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
         # init smooth parameters
         set_quant_state(qlayer, weight_quant=False, act_quant=True)  # weight will be manually quantized before forward
         qlayer.let = args.let
@@ -256,7 +283,10 @@ def omniquant(
                     # obtain output of quantization model
                     with traincast():
                         smooth_and_quant_temporary(qlayer, args, is_llama)
-                        quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0]
+                        if is_rwkv7:
+                            quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids, v_first=inps_vfirst[index:index+args.batch_size])[0]
+                        else:
+                            quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0]
                         loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out)
                         if args.aug_loss:
                             loss += loss_func(fp_inps_2[index:index+args.batch_size,], quant_out)
@@ -283,7 +313,10 @@ def omniquant(
                 # with torch.cuda.amp.autocast():
                 with traincast():
                     for j in range(args.nsamples):
-                        quant_inps[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
+                        if is_rwkv7:
+                            quant_inps[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids, v_first=inps_vfirst[j])[0]
+                        else:
+                            quant_inps[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
             register_scales_and_zeros(qlayer)
             layers[i] = qlayer.to("cpu")
             omni_parameters[i] = omni_state_dict(qlayer)

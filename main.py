@@ -89,6 +89,8 @@ def evaluate(lm, args, logger):
             lm.model = lm.model.to(lm.device)
         elif "falcon" in args.net.lower():
             lm.model.transformer = lm.model.transformer.to(lm.device)
+        elif "rwkv" in args.net.lower():
+            lm.model.model = lm.model.model.to(lm.device)
 
 
     if args.eval_ppl:
@@ -124,6 +126,8 @@ def evaluate(lm, args, logger):
                     outputs = lm.model.model(batch)
                 elif "falcon" in args.model:
                     outputs = lm.model.transformer(batch)
+                elif "rwkv" in args.net.lower():
+                    outputs = lm.model.model(batch)
                 hidden_states = outputs[0]
                 logits = lm.model.lm_head(hidden_states)
                 shift_logits = logits[:, :-1, :]
