@@ -82,6 +82,8 @@ def evaluate(lm, args, logger):
             lm.model.transformer.word_embeddings.to(input_device)
             lm.model.transformer.ln_f.to(output_device)
             lm.model.lm_head.to(output_device)
+        elif "rwkv" in args.net.lower():
+            print("TODO")
     else:
         if "opt" in args.net.lower():
             lm.model.model.decoder = lm.model.model.decoder.to(lm.device)
@@ -90,7 +92,7 @@ def evaluate(lm, args, logger):
         elif "falcon" in args.net.lower():
             lm.model.transformer = lm.model.transformer.to(lm.device)
         elif "rwkv" in args.net.lower():
-            lm.model.model = lm.model.model.to(lm.device)
+            lm.model = lm.model.to(lm.device)
 
 
     if args.eval_ppl:
