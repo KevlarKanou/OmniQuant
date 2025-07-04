@@ -100,7 +100,11 @@ def omniquant(
         is_rwkv7 = True
         layers = model.model.layers
         model.model.embeddings = model.model.embeddings.to(dev)
-        layer_name_prefix = "model.model.layers"
+        layer_name_prefix = "model.layers"
+        pairs = {
+            # "r_proj":"qkv",
+            "key":"fc1"
+        }
     else:
         raise ValueError("Only support for opt/llama/Llama-2/falcon/mixtral now")
     
@@ -244,24 +248,32 @@ def omniquant(
         set_quant_state(qlayer, weight_quant=False, act_quant=True)  # weight will be manually quantized before forward
         qlayer.let = args.let
         use_shift = True 
-        if is_llama or args.abits == 16:
+        if is_llama or is_rwkv7 or args.abits == 16:
             use_shift = False                   # deactivate channel-wise shifting for llama model and weight-only quantization
         if args.let:
             # init channel-wise scaling and shift
-            qlayer.register_parameter("qkt_smooth_scale",torch.nn.Parameter(torch.ones(layer.self_attn.q_proj.out_features,device=dev, dtype=dtype)))
-            for name,module in qlayer.named_modules():
-                if isinstance(module, QuantLinear):
-                    for key in pairs.keys():
-                        if key in name:
-                            act = act_scales[f"{layer_name_prefix}.{i}.{name}"].to(device=dev, dtype=dtype).clamp(min=1e-5)
-                            weight = module.weight.abs().max(dim=0)[0].clamp(min=1e-5)
-                            scale = (act.pow(args.alpha)/weight.pow(1-args.alpha)).clamp(min=1e-5)
-                            if use_shift and not is_llama:
-                                shift = act_shifts[f"{layer_name_prefix}.{i}.{name}"].to(device=dev, dtype=dtype)
-                            else:
-                                shift = torch.zeros_like(scale)
-                            qlayer.register_parameter(f"{pairs[key]}_smooth_shift",torch.nn.Parameter(shift))
-                            qlayer.register_parameter(f"{pairs[key]}_smooth_scale",torch.nn.Parameter(scale))
+            if is_rwkv7:
+                # qlayer.register_parameter("qkv_smooth_scale",torch.nn.Parameter(torch.ones(layer.attn.r_proj.in_features,device=dev, dtype=dtype)))
+                # qlayer.register_parameter("qkv_smooth_shift",torch.nn.Parameter(torch.zeros_like(qlayer.qkv_smooth_scale)))
+                qlayer.register_parameter("fc1_smooth_scale",torch.nn.Parameter(torch.ones(layer.ffn.key.in_features,device=dev, dtype=dtype)))
+                qlayer.register_parameter("fc1_smooth_shift",torch.nn.Parameter(torch.zeros_like(qlayer.fc1_smooth_scale)))
+            else:
+            # if not is_rwkv7:
+                qlayer.register_parameter("qkt_smooth_scale",torch.nn.Parameter(torch.ones(layer.self_attn.q_proj.out_features,device=dev, dtype=dtype)))
+                for name,module in qlayer.named_modules():
+                    if isinstance(module, QuantLinear):
+                        for key in pairs.keys():
+                            if key in name:
+                                act = act_scales[f"{layer_name_prefix}.{i}.{name}"].to(device=dev, dtype=dtype).clamp(min=1e-5)
+                                weight = module.weight.abs().max(dim=0)[0].clamp(min=1e-5)
+                                scale = (act.pow(args.alpha)/weight.pow(1-args.alpha)).clamp(min=1e-5)
+                                print(name, scale)
+                                if use_shift and not is_llama and not is_rwkv7:
+                                    shift = act_shifts[f"{layer_name_prefix}.{i}.{name}"].to(device=dev, dtype=dtype)
+                                else:
+                                    shift = torch.zeros_like(scale)
+                                qlayer.register_parameter(f"{pairs[key]}_smooth_shift",torch.nn.Parameter(shift))
+                                qlayer.register_parameter(f"{pairs[key]}_smooth_scale",torch.nn.Parameter(scale))
                                 
         if args.resume:
             qlayer.load_state_dict(omni_parameters[i], strict=False)
@@ -282,7 +294,7 @@ def omniquant(
                     index = j * args.batch_size
                     # obtain output of quantization model
                     with traincast():
-                        smooth_and_quant_temporary(qlayer, args, is_llama)
+                        smooth_and_quant_temporary(qlayer, args, is_llama, is_rwkv7)
                         if is_rwkv7:
                             quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids, v_first=inps_vfirst[index:index+args.batch_size])[0]
                         else:
@@ -306,7 +318,7 @@ def omniquant(
             del optimizer
         qlayer.half() 
         # real smooth and quantization
-        smooth_and_quant_inplace(qlayer, args, is_llama)
+        smooth_and_quant_inplace(qlayer, args, is_llama, is_rwkv7)
         if args.epochs>0:
             # update input of quantization model
             with torch.no_grad():
