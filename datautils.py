@@ -171,6 +171,32 @@ def get_c4_new(nsamples, seed, seqlen, model):
     return trainloader, valenc
 
 
+def get_binidx(path, nsamples, seed, seqlen):
+    from indexed_dataset import MMapIndexedDataset
+    dataset = MMapIndexedDataset(str(path))
+    block_size = seqlen
+    len_total = 1
+    took = []
+    tokens = np.array([0])
+    random.seed(seed)
+    while len_total < nsamples * block_size:
+        if len(took) >= len(dataset):
+            break
+        idx = random.randint(0, len(dataset) - 1)
+        while idx in took:
+            if len(took) >= len(dataset):
+                break
+            idx = random.randint(0, len(dataset) - 1)
+        took.append(idx)
+        len_total += len(dataset[idx])
+        tokens = np.concatenate((tokens, np.array([0]), np.array(dataset[idx])), axis=0)
+    
+    trainloader = []
+    for i in range(len(tokens) // block_size):
+        inp = torch.LongTensor(tokens[i * block_size: (i + 1) * block_size])
+        trainloader.append((inp, None))
+    return trainloader, None
+
 def get_loaders(
     name, nsamples=128, seed=0, seqlen=2048, model='',
 ):
@@ -193,3 +219,6 @@ def get_loaders(
         train=wiki_train+ptb_train+c4_train
         val=None
         return train,val
+    if 'binidx' in name:
+        path = name.split(":")[-1]
+        return get_binidx(path, nsamples, seed, seqlen)

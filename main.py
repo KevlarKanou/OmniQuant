@@ -202,7 +202,7 @@ def main():
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--real_quant", default=False, action="store_true", help="real quantization, which can see memory reduce. Note that due to the limitations of AutoGPTQ kernels, the real quantization of weight-only quantization can only lead memory reduction, but with slower inference speed.")
     parser.add_argument("--calib_dataset",type=str,default="wikitext2",
-        choices=["wikitext2", "ptb", "c4", "mix","pile"],
+        # choices=["wikitext2", "ptb", "c4", "mix","pile"],
         help="Where to extract calibration data from.",
     )
     parser.add_argument("--nsamples", type=int, default=128, help="Number of calibration data samples.")
