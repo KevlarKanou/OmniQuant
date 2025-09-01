@@ -238,6 +238,7 @@ def main():
     parser.add_argument("--net", type=str, default=None, choices=net_choices)
     parser.add_argument("--act-scales", type=str, default=None)
     parser.add_argument("--act-shifts", type=str, default=None)
+    parser.add_argument("--quant_lm_head", default=False, action="store_true", help="quantize lm_head for rwkv")
 
     args = parser.parse_args()
     random.seed(args.seed)
