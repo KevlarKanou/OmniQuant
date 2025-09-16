@@ -40,6 +40,24 @@ def smooth_ln_fcs_temporary(ln, fcs, scales,shifts):
             fc.temp_bias = fc.weight@shifts
         fc.temp_weight = fc.weight * scales.view(1,-1)
 
+def smooth_ln_lerp_fcs_temporary(ln, fcs, scales,shifts):
+    ln.use_temporary_parameter = True
+    if not isinstance(fcs, list):
+        fcs = [fcs]
+    if hasattr(ln, 'bias') and ln.bias is not None:
+        ln.temp_bias = ln.bias
+    else:
+        ln.temp_bias = torch.zeros_like(scales)
+
+    ln.temp_weight = ln.weight / scales
+
+    for fc in fcs:
+        fc.use_temporary_parameter = True
+        if hasattr(fc, 'bias') and fc.bias is not None:
+            fc.temp_bias = fc.bias
+        else:
+            fc.temp_bias = torch.zeros(fc.weight.size(0), device=fc.weight.device, dtype=fc.weight.dtype)
+        fc.temp_weight = fc.weight * scales.view(1,-1)
 
 def smooth_fc_fc_temporary(fc1, fc2, scales,shifts=None):
     # only support for v_proj and out_proh now.
@@ -89,6 +107,15 @@ def smooth_ln_fcs_inplace(ln, fcs, scales,shifts):
             fc.register_buffer('bias',fc.weight@shifts)
         fc.weight.mul_(scales.view(1,-1))
 
+def smooth_ln_lerp_fcs_inplace(ln, fcs, scales,shifts):
+    ln.use_temporary_parameter = False
+    if not isinstance(fcs, list):
+        fcs = [fcs]
+
+    ln.weight.div_(scales)
+    for fc in fcs:
+        fc.use_temporary_parameter = False
+        fc.weight.mul_(scales.view(1,-1))
 
 def smooth_fc_fc_inplace(fc1, fc2, scales,shifts=None):
     # only support for v_proj and out_proh now.

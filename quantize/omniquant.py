@@ -4,6 +4,7 @@ from models.int_llama_layer import QuantLlamaDecoderLayer
 from models.int_opt_layer import QuantOPTDecoderLayer
 from models.int_falcon_layer import QuantFalconDecoderLayer
 from quantize.int_linear import QuantLinear
+from quantize.omni_norm import OmniLayerNorm
 from contextlib import nullcontext
 import copy
 import math
@@ -225,7 +226,11 @@ def omniquant(
             for name, module in qlayer.named_modules():
                 if isinstance(module,torch.nn.Linear) and not "lora" in name:
                     quantlinear = QuantLinear(module, args.weight_quant_params, args.act_quant_params)
-                    add_new_module(name, qlayer, quantlinear)    
+                    add_new_module(name, qlayer, quantlinear)
+                # replace LayerNorm with OmniLayerNorm
+                if isinstance(module, torch.nn.LayerNorm):
+                    omnilayernorm = OmniLayerNorm(module)
+                    add_new_module(name, qlayer, omnilayernorm)
         else:
             qlayer = DecoderLayer(lm.model.config, layer, args)
         qlayer = qlayer.to(dev)
@@ -262,6 +267,8 @@ def omniquant(
             if is_rwkv7:
                 # qlayer.register_parameter("qkv_smooth_scale",torch.nn.Parameter(torch.ones(layer.attn.r_proj.in_features,device=dev, dtype=dtype)))
                 # qlayer.register_parameter("qkv_smooth_shift",torch.nn.Parameter(torch.zeros_like(qlayer.qkv_smooth_scale)))
+                qlayer.register_parameter("rkv_smooth_scale",torch.nn.Parameter(torch.ones(layer.attn.r_proj.in_features,device=dev, dtype=dtype)))
+                qlayer.register_parameter("rkv_smooth_shift",torch.nn.Parameter(torch.zeros_like(qlayer.rkv_smooth_scale)))
                 qlayer.register_parameter("fc1_smooth_scale",torch.nn.Parameter(torch.ones(layer.ffn.key.in_features,device=dev, dtype=dtype)))
                 qlayer.register_parameter("fc1_smooth_shift",torch.nn.Parameter(torch.zeros_like(qlayer.fc1_smooth_scale)))
             else:
@@ -374,6 +381,11 @@ def omniquant(
         logger.info(f"=== Start quantize lm_head ===")
         lm_head = model.lm_head.to(dev)
         q_lm_head = QuantLinear(lm_head, args.weight_quant_params, args.act_quant_params).to(dev)
+        lm_norm = OmniLayerNorm(model.model.norm).to(dev)
+        q_lm_head.let = args.let
+        if args.let:
+            q_lm_head.register_parameter("fc1_smooth_scale",torch.nn.Parameter(torch.ones(lm_head.in_features,device=dev, dtype=dtype)))
+            q_lm_head.register_parameter("fc1_smooth_shift",torch.nn.Parameter(torch.zeros_like(q_lm_head.fc1_smooth_scale)))
 
         if args.epochs > 0:
             fp_lm_head_out = torch.zeros(
@@ -391,16 +403,17 @@ def omniquant(
         if args.epochs > 0:
             with torch.no_grad():
                 q_lm_head.float()
-            optimizer = torch.optim.AdamW(lwc_parameters(q_lm_head), lr=args.lwc_lr, weight_decay=args.wd)
+            use_shift = False
+            optimizer = torch.optim.AdamW(
+                [{"params":let_parameters(q_lm_head, use_shift),"lr":args.let_lr}, {"params":lwc_parameters(qlayer),"lr":args.lwc_lr}],weight_decay=args.wd)
             loss_scaler = utils.NativeScalerWithGradNormCount()
-            
             for epochs in range(args.epochs):
                 loss_list = []
                 norm_list = []
                 for j in range(args.nsamples//args.batch_size):    
                     index = j * args.batch_size
                     with traincast():
-                        smooth_and_quant_temporary(q_lm_head, args, False, True)
+                        smooth_and_quant_temporary(q_lm_head, args, False, True, True, lm_norm)
                         quant_out = q_lm_head(quant_inps[index:index+args.batch_size,].to(dev))
                         loss = loss_func(fp_lm_head_out[index:index+args.batch_size,].to(dev), quant_out)
 
@@ -420,7 +433,8 @@ def omniquant(
             del optimizer
         
         q_lm_head.half()
-        smooth_and_quant_inplace(q_lm_head, args, False, True)
+        lm_norm.half()
+        smooth_and_quant_inplace(q_lm_head, args, False, True, True, lm_norm)
         
         if args.epochs > 0:
             register_scales_and_zeros(q_lm_head)
@@ -454,6 +468,7 @@ def omniquant(
                 print(f"pack quantized lm_head finished")
                 del module
         model.lm_head = q_lm_head.to("cpu")
+        model.model.norm = lm_norm.to("cpu")
         del lm_head
         torch.cuda.empty_cache()
 
