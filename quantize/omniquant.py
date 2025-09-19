@@ -5,6 +5,8 @@ from models.int_opt_layer import QuantOPTDecoderLayer
 from models.int_falcon_layer import QuantFalconDecoderLayer
 from quantize.int_linear import QuantLinear
 from quantize.omni_norm import OmniLayerNorm
+from fla.layers.rwkv6 import LoRA as rwkvLoRA
+from quantize.int_linear import QuantLoRA
 from contextlib import nullcontext
 import copy
 import math
@@ -231,6 +233,9 @@ def omniquant(
                 if isinstance(module, torch.nn.LayerNorm):
                     omnilayernorm = OmniLayerNorm(module)
                     add_new_module(name, qlayer, omnilayernorm)
+                if isinstance(module, rwkvLoRA) and args.quant_lora:
+                    quantlora = QuantLoRA(org_module=module, weight_quant_params=args.weight_quant_params, act_quant_params=args.act_quant_params)
+                    add_new_module(name, qlayer, quantlora)
         else:
             qlayer = DecoderLayer(lm.model.config, layer, args)
         qlayer = qlayer.to(dev)
@@ -357,6 +362,7 @@ def omniquant(
             register_scales_and_zeros(qlayer)
             layers[i] = qlayer.to("cpu")
         if args.real_quant:
+            assert args.quant_lora == False, "real quantization of rwkv LoRA is not supported now"
             assert args.wbits in [2,3,4] and args.abits >= 16   # only support weight-only quantization
             named_linears = get_named_linears(qlayer)
             for name, module in named_linears.items():

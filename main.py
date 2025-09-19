@@ -18,7 +18,7 @@ from categories import subcategories, categories
 
 from models.int_llama_layer import QuantLlamaDecoderLayer
 from models.int_opt_layer import QuantOPTDecoderLayer
-from quantize.int_linear import QuantLinear
+from quantize.int_linear import QuantLinear, QuantLoRA
 
 import pdb
 
@@ -239,6 +239,7 @@ def main():
     parser.add_argument("--act-scales", type=str, default=None)
     parser.add_argument("--act-shifts", type=str, default=None)
     parser.add_argument("--quant_lm_head", default=False, action="store_true", help="quantize lm_head for rwkv")
+    parser.add_argument("--quant_lora", default=False, action="store_true", help="quantize lora for rwkv")
 
     args = parser.parse_args()
     random.seed(args.seed)
@@ -364,6 +365,11 @@ def main():
             if isinstance(module, QuantLinear):
                 del module.weight_quantizer.lowbound_factor
                 del module.weight_quantizer.upbound_factor
+            if isinstance(module, QuantLoRA):
+                del module.down_weight_quantizer.lowbound_factor
+                del module.down_weight_quantizer.upbound_factor
+                del module.up_weight_quantizer.lowbound_factor
+                del module.up_weight_quantizer.upbound_factor
             if isinstance(module,QuantLlamaDecoderLayer) or isinstance(module,QuantOPTDecoderLayer):
                 if args.let:
                     del module.qkv_smooth_scale
