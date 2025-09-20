@@ -83,9 +83,9 @@ def smooth_and_quant_temporary(model, args, isllama, isrwkv7, is_lm_head=False, 
                 smooth_ln_fcs_temporary(lm_norm, [model],
                                         model.fc1_smooth_scale,model.fc1_smooth_shift)
             else:
-                smooth_ln_lerp_fcs_temporary(model.attn_norm, [model.attn.r_proj, model.attn.k_proj, model.attn.v_proj],
+                smooth_ln_fcs_temporary(model.attn_norm, [model.attn.r_proj, model.attn.k_proj, model.attn.v_proj],
                                         model.rkv_smooth_scale,model.rkv_smooth_shift)
-                smooth_ln_lerp_fcs_temporary(model.ffn_norm, [model.ffn.key],
+                smooth_ln_fcs_temporary(model.ffn_norm, [model.ffn.key],
                                         model.fc1_smooth_scale,model.fc1_smooth_shift)
                 # model.attn.r_proj.temp_weight = model.attn.r_proj.weight
                 # model.attn.k_proj.temp_weight = model.attn.k_proj.weight
@@ -173,9 +173,9 @@ def smooth_and_quant_inplace(model, args, isllama, isrwkv7, is_lm_head=False, lm
             else:
                 # smooth_ln_fcs_inplace(model.attn_norm, [model.attn.r_proj, model.attn.k_proj, model.attn.v_proj],
                                         # model.qkv_smooth_scale,model.qkv_smooth_shift)
-                smooth_ln_lerp_fcs_inplace(model.attn_norm, [model.attn.r_proj, model.attn.k_proj, model.attn.v_proj],
+                smooth_ln_fcs_inplace(model.attn_norm, [model.attn.r_proj, model.attn.k_proj, model.attn.v_proj],
                                         model.rkv_smooth_scale,model.rkv_smooth_shift)
-                smooth_ln_lerp_fcs_inplace(model.ffn_norm, [model.ffn.key],
+                smooth_ln_fcs_inplace(model.ffn_norm, [model.ffn.key],
                                         model.fc1_smooth_scale,model.fc1_smooth_shift)
         else: # opt
             smooth_ln_fcs_inplace(model.self_attn_layer_norm,[model.self_attn.q_proj, model.self_attn.k_proj, model.self_attn.v_proj],
