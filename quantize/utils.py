@@ -1,5 +1,5 @@
 from collections import OrderedDict
-from quantize.int_linear import QuantLinear, QuantLoRA
+from quantize.int_linear import QuantLinear
 import torch
 from quantize.int_matmul import QuantMatMul
 from models.transformation import *
@@ -40,9 +40,6 @@ def register_scales_and_zeros(model):
     for name, module in model.named_modules():
         if isinstance(module, QuantLinear):
             module.weight_quantizer.register_scales_and_zeros()
-        if isinstance(module, QuantLoRA):
-            module.down_weight_quantizer.register_scales_and_zeros()
-            module.up_weight_quantizer.register_scales_and_zeros()
 
 class TruncateFunction(torch.autograd.Function):
     @staticmethod
@@ -106,13 +103,6 @@ def smooth_and_quant_temporary(model, args, isllama, isrwkv7, is_lm_head=False, 
         for name, module in model.named_modules():
             if isinstance(module, QuantLinear):
                 module.temp_weight = module.weight
-            if isinstance(module, QuantLoRA):
-                module.temp_lora_down_weight = module.lora[0].weight.data
-                module.temp_lora_up_weight = module.lora[2].weight.data
-                if module.bias:
-                    module.temp_lora_up_bias = module.lora[2].bias.data
-                else:
-                    module.temp_lora_up_bias = None
 
     # quant
     for name, module in model.named_modules():
@@ -124,19 +114,6 @@ def smooth_and_quant_temporary(model, args, isllama, isrwkv7, is_lm_head=False, 
             if not hasattr(module, "temp_bias"):
                 module.temp_bias = module.bias
             module.use_temporary_parameter=True
-        if isinstance(module, QuantLoRA):
-            if hasattr(module, "temp_lora_down_weight"):
-                module.temp_lora_down_weight = module.down_weight_quantizer(module.temp_lora_down_weight)
-            else:
-                module.temp_lora_down_weight = module.down_weight_quantizer(module.lora[0].weight.data)
-            if hasattr(module, "temp_lora_up_weight"):
-                module.temp_lora_up_weight = module.up_weight_quantizer(module.temp_lora_up_weight)
-            else:
-                module.temp_lora_up_weight = module.up_weight_quantizer(module.lora[2].weight.data)
-            if module.bias:
-                if not hasattr(module, "temp_lora_up_bias"):
-                    module.temp_lora_up_bias = module.lora[2].bias.data
-            module.use_temporary_parameter=True
             
 def clear_temp_variable(model):
     for name, module in model.named_modules():
@@ -145,13 +122,6 @@ def clear_temp_variable(model):
                 del module.temp_weight
             if hasattr(module, "temp_bias"):
                 del module.temp_bias
-        if isinstance(module, QuantLoRA):
-            if hasattr(module, "temp_lora_down_weight"):
-                del module.temp_lora_down_weight
-            if hasattr(module, "temp_lora_up_weight"):
-                del module.temp_lora_up_weight
-            if hasattr(module, "temp_lora_up_bias"):
-                del module.temp_lora_up_bias
 
 @torch.no_grad()   
 def smooth_and_quant_inplace(model, args, isllama, isrwkv7, is_lm_head=False, lm_norm=None):
@@ -191,19 +161,11 @@ def smooth_and_quant_inplace(model, args, isllama, isrwkv7, is_lm_head=False, lm
         if isinstance(module, QuantLinear):
             module.weight = module.weight_quantizer(module.weight)
             module.use_temporary_parameter=False
-        if isinstance(module, QuantLoRA):
-            lora_down_weight = module.down_weight_quantizer(module.lora[0].weight.data)
-            lora_up_weight = module.up_weight_quantizer(module.lora[2].weight.data)
-            module.use_temporary_parameter=False
-            module.lora[0].weight.data.copy_(lora_down_weight)
-            module.lora[2].weight.data.copy_(lora_up_weight)
-            # if module.lora_up_bias is not None:
-            #     module.lora[2].bias.data.copy_(module.lora_up_bias.to(torch.float16))
 
 def set_quant_state(self, weight_quant: bool = False, act_quant: bool = False):
     # setting weight quantization here does not affect actual forward pass
     self.use_weight_quant = weight_quant
     self.use_act_quant = act_quant
     for m in self.modules():
-        if isinstance(m, (QuantLinear, QuantMatMul, QuantLoRA)):
+        if isinstance(m, (QuantLinear, QuantMatMul)):
             m.set_quant_state(weight_quant, act_quant)

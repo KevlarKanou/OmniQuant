@@ -18,7 +18,7 @@ from categories import subcategories, categories
 
 from models.int_llama_layer import QuantLlamaDecoderLayer
 from models.int_opt_layer import QuantOPTDecoderLayer
-from quantize.int_linear import QuantLinear, QuantLoRA
+from quantize.int_linear import QuantLinear
 
 import pdb
 
@@ -365,11 +365,6 @@ def main():
             if isinstance(module, QuantLinear):
                 del module.weight_quantizer.lowbound_factor
                 del module.weight_quantizer.upbound_factor
-            if isinstance(module, QuantLoRA):
-                del module.down_weight_quantizer.lowbound_factor
-                del module.down_weight_quantizer.upbound_factor
-                del module.up_weight_quantizer.lowbound_factor
-                del module.up_weight_quantizer.upbound_factor
             if isinstance(module,QuantLlamaDecoderLayer) or isinstance(module,QuantOPTDecoderLayer):
                 if args.let:
                     del module.qkv_smooth_scale
