@@ -387,8 +387,9 @@ def omniquant(
         logger.info(f"=== Start quantize lm_head ===")
         lm_head = model.lm_head.to(dev)
         q_lm_head = QuantLinear(lm_head, args.weight_quant_params, args.act_quant_params).to(dev)
-        lm_norm = OmniLayerNorm(model.model.norm).to(dev)
         q_lm_head.let = args.let
+        omnilayernorm = OmniLayerNorm(model.model.norm).to(dev)
+        add_new_module("norm", model.model, omnilayernorm)
         if args.let:
             q_lm_head.register_parameter("fc1_smooth_scale",torch.nn.Parameter(torch.ones(lm_head.in_features,device=dev, dtype=dtype)))
             q_lm_head.register_parameter("fc1_smooth_shift",torch.nn.Parameter(torch.zeros_like(q_lm_head.fc1_smooth_scale)))
@@ -420,7 +421,7 @@ def omniquant(
                 for j in range(args.nsamples//args.batch_size):    
                     index = j * args.batch_size
                     with traincast():
-                        smooth_and_quant_temporary(q_lm_head, args, False, True, True, lm_norm)
+                        smooth_and_quant_temporary(q_lm_head, args, False, True, True, model.model.norm)
                         quant_out = q_lm_head(quant_inps[index:index+args.batch_size,].to(dev))
                         loss = loss_func(fp_lm_head_out[index:index+args.batch_size,].to(dev), quant_out)
 
@@ -440,8 +441,8 @@ def omniquant(
             del optimizer
         
         q_lm_head.half()
-        lm_norm.half()
-        smooth_and_quant_inplace(q_lm_head, args, False, True, True, lm_norm)
+        model.model.norm.half()
+        smooth_and_quant_inplace(q_lm_head, args, False, True, True, model.model.norm)
         
         if args.epochs > 0:
             register_scales_and_zeros(q_lm_head)
@@ -475,7 +476,6 @@ def omniquant(
                 print(f"pack quantized lm_head finished")
                 del module
         model.lm_head = q_lm_head.to("cpu")
-        model.model.norm = lm_norm.to("cpu")
         del lm_head
         torch.cuda.empty_cache()
 
