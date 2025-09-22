@@ -47,23 +47,23 @@ def smooth_fc_fc_temporary(fc1, fc2, scales,shifts=None):
     if hasattr(fc1, 'bias') and fc1.bias is not None:
         fc1.temp_bias = (fc1.bias-shifts)/scales.view(-1)
     else:
-        fc1.temp_bias = (-1*shifts)/ scales if shifts is not None else torch.zeros_like(scales)
+        fc1.temp_bias = (-1*shifts)/ scales if shifts is not None else None
     fc1.temp_weight = fc1.weight/scales.view(-1,1)
     
     if hasattr(fc2, 'bias') and fc2.bias is not None:
         fc2.temp_bias = fc2.bias + fc2.weight@shifts
     else:
-        fc2.temp_bias = fc2.weight@shifts if shifts is not None else torch.zeros_like(scales)
+        fc2.temp_bias = fc2.weight@shifts if shifts is not None else None
     fc2.temp_weight = fc2.weight * scales.view(1,-1)
 
 def smooth_cmix_k_v_temporary(fc1, fc2, scales):
     fc1.use_temporary_parameter = True
     fc2.use_temporary_parameter = True
 
-    # fc1.temp_bias = torch.zeros_like(scales)
+    # fc1.temp_bias = None
     fc1.temp_weight = fc1.weight/scales.sqrt().view(-1,1)
 
-    fc2.temp_bias = torch.zeros_like(scales)
+    fc2.temp_bias = None
     fc2.temp_weight = fc2.weight * scales.view(1,-1)
 
 def smooth_q_k_temporary(q_proj, k_proj, scales):
