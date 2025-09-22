@@ -254,7 +254,11 @@ def omniquant(
                         current_attention_mask = attention_mask_batch[:current_batch_size] if attention_mask_batch is not None else None
 
                         if is_rwkv7:
-                            fp_inps[index:end_index] = qlayer(fp_inps[index:end_index].to(dev), attention_mask=current_attention_mask,position_ids=position_ids, v_first=inps_vfirst[index:end_index].to(dev))[0].cpu()
+                            if args.deactive_amp:
+                                fp_inps[index:end_index] = qlayer(fp_inps[index:end_index].to(dev).to(torch.float16), attention_mask=current_attention_mask,position_ids=position_ids, v_first=inps_vfirst[index:end_index].to(dev).to(torch.float16))[0].float().cpu()
+                            else:
+                                fp_inps[index:end_index] = qlayer(fp_inps[index:end_index].to(dev), attention_mask=current_attention_mask,position_ids=position_ids, v_first=inps_vfirst[index:end_index].to(dev))[0].cpu()
+
                             if args.aug_loss:
                                 fp_inps_2[index:end_index] = qlayer(quant_inps[index:end_index].to(dev), attention_mask=current_attention_mask,position_ids=position_ids, v_first=inps_vfirst[index:end_index].to(dev))[0].cpu()
                         else:
@@ -359,7 +363,10 @@ def omniquant(
                         current_attention_mask = attention_mask_batch[:current_batch_size] if attention_mask_batch is not None else None
 
                         if is_rwkv7:
-                            quant_inps[index:end_index] = qlayer(quant_inps[index:end_index].to(dev), attention_mask=current_attention_mask,position_ids=position_ids, v_first=inps_vfirst[index:end_index].to(dev))[0].cpu()
+                            if args.deactive_amp:
+                                quant_inps[index:end_index] = qlayer(quant_inps[index:end_index].to(dev).to(torch.float16), attention_mask=current_attention_mask,position_ids=position_ids, v_first=inps_vfirst[index:end_index].to(dev).to(torch.float16))[0].float().cpu()
+                            else:
+                                quant_inps[index:end_index] = qlayer(quant_inps[index:end_index].to(dev), attention_mask=current_attention_mask,position_ids=position_ids, v_first=inps_vfirst[index:end_index].to(dev))[0].cpu()
                         else:
                             quant_inps[index:end_index] = qlayer(quant_inps[index:end_index].to(dev), attention_mask=current_attention_mask,position_ids=position_ids)[0].cpu()
             register_scales_and_zeros(qlayer)
@@ -411,8 +418,10 @@ def omniquant(
                     for j in range(0, args.nsamples, args.batch_size):
                         index = j
                         end_index = min(index + args.batch_size, args.nsamples)
-                        fp_lm_head_out[index:end_index] = lm_head(quant_inps[index:end_index].to(dev)).cpu()
-
+                        if args.deactive_amp:
+                            fp_lm_head_out[index:end_index] = lm_head(quant_inps[index:end_index].to(dev).to(torch.float16)).float().cpu()
+                        else:
+                            fp_lm_head_out[index:end_index] = lm_head(quant_inps[index:end_index].to(dev)).cpu()
         set_quant_state(q_lm_head, weight_quant=False, act_quant=True)
 
         if args.epochs > 0:
