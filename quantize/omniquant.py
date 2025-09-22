@@ -270,12 +270,20 @@ def omniquant(
         if args.let:
             # init channel-wise scaling and shift
             if is_rwkv7:
-                # qlayer.register_parameter("qkv_smooth_scale",torch.nn.Parameter(torch.ones(layer.attn.r_proj.in_features,device=dev, dtype=dtype)))
-                # qlayer.register_parameter("qkv_smooth_shift",torch.nn.Parameter(torch.zeros_like(qlayer.qkv_smooth_scale)))
                 qlayer.register_parameter("rkv_smooth_scale",torch.nn.Parameter(torch.ones(layer.attn.r_proj.in_features,device=dev, dtype=dtype)))
                 qlayer.register_parameter("rkv_smooth_shift",torch.nn.Parameter(torch.zeros_like(qlayer.rkv_smooth_scale)))
                 qlayer.register_parameter("fc1_smooth_scale",torch.nn.Parameter(torch.ones(layer.ffn.key.in_features,device=dev, dtype=dtype)))
                 qlayer.register_parameter("fc1_smooth_shift",torch.nn.Parameter(torch.zeros_like(qlayer.fc1_smooth_scale)))
+                if args.cmix_kv_smooth:
+                    qlayer.register_parameter("fc2_smooth_scale",torch.nn.Parameter(torch.ones(layer.ffn.value.in_features,device=dev, dtype=dtype)))
+                if args.quant_lora and args.lora_smooth:
+                    qlayer.register_parameter("lora_a_smooth_scale",torch.nn.Parameter(torch.ones(layer.attn.a_lora.lora[2].in_features,device=dev, dtype=dtype)))
+                    qlayer.register_parameter("lora_a_smooth_shift",torch.nn.Parameter(torch.zeros_like(qlayer.lora_a_smooth_scale)))
+                    if hasattr(qlayer.attn, "v_lora"):
+                        qlayer.register_parameter("lora_v_smooth_scale",torch.nn.Parameter(torch.ones(layer.attn.v_lora.lora[2].in_features,device=dev, dtype=dtype)))
+                        qlayer.register_parameter("lora_v_smooth_shift",torch.nn.Parameter(torch.zeros_like(qlayer.lora_v_smooth_scale)))
+                if args.quant_lora and args.o_proj_smooth:
+                    qlayer.register_parameter("out_smooth_scale",torch.nn.Parameter(torch.ones(layer.attn.o_proj.in_features,device=dev, dtype=dtype)))
             else:
             # if not is_rwkv7:
                 qlayer.register_parameter("qkt_smooth_scale",torch.nn.Parameter(torch.ones(layer.self_attn.q_proj.out_features,device=dev, dtype=dtype)))
@@ -327,7 +335,7 @@ def omniquant(
                         
                     loss_list.append(loss.detach().cpu())
                     optimizer.zero_grad()
-                    norm = loss_scaler(loss, optimizer,parameters= get_omni_parameters(qlayer, use_shift)).cpu()
+                    norm = loss_scaler(loss, optimizer,parameters= get_omni_parameters(qlayer, use_shift), retain_graph=True).cpu()
                     norm_list.append(norm.data)
 
                 loss_mean = torch.stack(loss_list).mean()

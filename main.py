@@ -239,7 +239,12 @@ def main():
     parser.add_argument("--act-scales", type=str, default=None)
     parser.add_argument("--act-shifts", type=str, default=None)
     parser.add_argument("--quant_lm_head", default=False, action="store_true", help="quantize lm_head for rwkv")
+
+    # under testing
     parser.add_argument("--quant_lora", default=False, action="store_true", help="quantize lora for rwkv")
+    parser.add_argument("--lora_smooth", default=False, action="store_true")
+    parser.add_argument("--o_proj_smooth", default=False, action="store_true")
+    parser.add_argument("--cmix_kv_smooth", default=False, action="store_true")
 
     args = parser.parse_args()
     random.seed(args.seed)

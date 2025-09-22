@@ -80,15 +80,46 @@ def smooth_and_quant_temporary(model, args, isllama, isrwkv7, is_lm_head=False, 
                 smooth_ln_fcs_temporary(lm_norm, [model],
                                         model.fc1_smooth_scale,model.fc1_smooth_shift)
             else:
-                smooth_ln_fcs_temporary(model.attn_norm, [model.attn.r_proj, model.attn.k_proj, model.attn.v_proj],
+                rkv = [model.attn.r_proj, model.attn.k_proj, model.attn.v_proj]
+                
+                # if args.quant_lora:
+                    # Numerical instability...
+                    # rkv += [model.attn.w_lora.lora[0], model.attn.a_lora.lora[0], model.attn.g_lora.lora[0]]
+                    # if hasattr(model.attn, "v_lora"):
+                    #     rkv += [model.attn.v_lora.lora[0]]
+                if args.quant_lora:
+                    model.attn.w_lora.lora[0].temp_weight = model.attn.w_lora.lora[0].weight
+                    model.attn.w_lora.lora[2].temp_weight = model.attn.w_lora.lora[2].weight
+                    model.attn.g_lora.lora[0].temp_weight = model.attn.g_lora.lora[0].weight
+                    if args.lora_smooth:
+                        smooth_fc_fc_temporary(model.attn.a_lora.lora[0],model.attn.a_lora.lora[2],
+                                model.lora_a_smooth_scale, model.lora_a_smooth_shift)
+                        if hasattr(model.attn, "v_lora"):
+                            smooth_fc_fc_temporary(model.attn.v_lora.lora[0],model.attn.v_lora.lora[2],
+                                model.lora_v_smooth_scale, model.lora_v_smooth_shift)
+                    else:
+                        model.attn.a_lora.lora[0].temp_weight = model.attn.a_lora.lora[0].weight
+                        model.attn.a_lora.lora[2].temp_weight = model.attn.a_lora.lora[2].weight
+                        if hasattr(model.attn, "v_lora"):
+                            model.attn.v_lora.lora[0].temp_weight = model.attn.v_lora.lora[0].weight
+                            model.attn.v_lora.lora[2].temp_weight = model.attn.v_lora.lora[2].weight
+                    if args.o_proj_smooth:
+                        smooth_fc_fc_temporary(model.attn.g_lora.lora[2],model.attn.o_proj,
+                                model.out_smooth_scale)
+                    else:
+                        model.attn.g_lora.lora[2].temp_weight = model.attn.g_lora.lora[2].weight
+                        model.attn.o_proj.temp_weight = model.attn.o_proj.weight
+                else:
+                    model.attn.o_proj.temp_weight = model.attn.o_proj.weight
+
+                smooth_ln_fcs_temporary(model.attn_norm, rkv,
                                         model.rkv_smooth_scale,model.rkv_smooth_shift)
                 smooth_ln_fcs_temporary(model.ffn_norm, [model.ffn.key],
                                         model.fc1_smooth_scale,model.fc1_smooth_shift)
-                # model.attn.r_proj.temp_weight = model.attn.r_proj.weight
-                # model.attn.k_proj.temp_weight = model.attn.k_proj.weight
-                # model.attn.v_proj.temp_weight = model.attn.v_proj.weight
-                model.attn.o_proj.temp_weight = model.attn.o_proj.weight
-                model.ffn.value.temp_weight = model.ffn.value.weight
+                if args.cmix_kv_smooth:
+                    smooth_cmix_k_v_temporary(model.ffn.key, model.ffn.value, model.fc2_smooth_scale)
+                else:
+                    model.ffn.value.temp_weight = model.ffn.value.weight
         else:
             smooth_ln_fcs_temporary(model.self_attn_layer_norm,[model.self_attn.q_proj, model.self_attn.k_proj, model.self_attn.v_proj],
                                     model.qkv_smooth_scale,model.qkv_smooth_shift)
@@ -141,12 +172,30 @@ def smooth_and_quant_inplace(model, args, isllama, isrwkv7, is_lm_head=False, lm
                 smooth_ln_fcs_inplace(lm_norm, [model],
                                         model.fc1_smooth_scale,model.fc1_smooth_shift)
             else:
-                # smooth_ln_fcs_inplace(model.attn_norm, [model.attn.r_proj, model.attn.k_proj, model.attn.v_proj],
-                                        # model.qkv_smooth_scale,model.qkv_smooth_shift)
-                smooth_ln_fcs_inplace(model.attn_norm, [model.attn.r_proj, model.attn.k_proj, model.attn.v_proj],
+                rkv = [model.attn.r_proj, model.attn.k_proj, model.attn.v_proj]
+                # Numerical instability...
+                # if args.quant_lora:
+                #     rkv += [model.attn.w_lora.lora[0], model.attn.a_lora.lora[0], model.attn.g_lora.lora[0]]
+                #     if hasattr(model.attn, "v_lora"):
+                #         rkv += [model.attn.v_lora.lora[0]]
+                if args.quant_lora and args.lora_smooth:
+                    smooth_fc_fc_inplace(model.attn.a_lora.lora[0],model.attn.a_lora.lora[2],
+                            model.lora_a_smooth_scale, model.lora_a_smooth_shift)
+                    if hasattr(model.attn, "v_lora"):
+                        smooth_fc_fc_inplace(model.attn.v_lora.lora[0],model.attn.v_lora.lora[2],
+                            model.lora_v_smooth_scale, model.lora_v_smooth_shift)
+                
+                if args.quant_lora and args.o_proj_smooth:
+                    smooth_fc_fc_inplace(model.attn.g_lora.lora[2],model.attn.o_proj,
+                        model.out_smooth_scale)
+
+                smooth_ln_fcs_inplace(model.attn_norm, rkv,
                                         model.rkv_smooth_scale,model.rkv_smooth_shift)
                 smooth_ln_fcs_inplace(model.ffn_norm, [model.ffn.key],
                                         model.fc1_smooth_scale,model.fc1_smooth_shift)
+                if args.cmix_kv_smooth:
+                    smooth_cmix_k_v_inplace(model.ffn.key, model.ffn.value, model.fc2_smooth_scale)
+
         else: # opt
             smooth_ln_fcs_inplace(model.self_attn_layer_norm,[model.self_attn.q_proj, model.self_attn.k_proj, model.self_attn.v_proj],
                                     model.qkv_smooth_scale,model.qkv_smooth_shift)
