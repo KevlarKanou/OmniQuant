@@ -427,10 +427,10 @@ def omniquant(
         if args.epochs > 0:
             with torch.no_grad():
                 q_lm_head.float()
-            optimizer = torch.optim.AdamW(lwc_parameters(q_lm_head), lr=args.lwc_lr, weight_decay=args.wd)
-            if args.let:
-                optimizer = torch.optim.AdamW(
-                    [{"params":let_parameters(q_lm_head, use_shift),"lr":args.let_lr}, {"params":lwc_parameters(qlayer),"lr":args.lwc_lr}],weight_decay=args.wd)
+            optimizer = torch.optim.AdamW(
+                [{"params":let_parameters(q_lm_head, use_shift),"lr":args.let_lr}, {"params":lwc_parameters(q_lm_head),"lr":args.lwc_lr}],
+                weight_decay=args.wd
+            )
             loss_scaler = utils.NativeScalerWithGradNormCount()
             for epochs in range(args.epochs):
                 loss_list = []
@@ -448,7 +448,7 @@ def omniquant(
                         
                     loss_list.append(loss.detach().cpu())
                     optimizer.zero_grad()
-                    norm = loss_scaler(loss, optimizer, parameters=lwc_parameters(q_lm_head)).cpu()
+                    norm = loss_scaler(loss, optimizer, parameters=get_omni_parameters(q_lm_head, use_shift)).cpu()
                     norm_list.append(norm.data)
 
                 loss_mean = torch.stack(loss_list).mean()
