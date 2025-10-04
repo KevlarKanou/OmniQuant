@@ -244,7 +244,9 @@ def main():
     parser.add_argument("--quant_lora", default=False, action="store_true", help="quantize lora for rwkv")
     parser.add_argument("--lora_smooth", default=False, action="store_true")
     parser.add_argument("--o_proj_smooth", default=False, action="store_true")
-    parser.add_argument("--cmix_kv_smooth", default=False, action="store_true")
+    parser.add_argument("--cmix_kv_smooth", default=False, action="store_true", help="Warning: poor ppl")
+    parser.add_argument("--use_smooth_shift", default=False, action="store_true")
+    parser.add_argument("--act_symmetric", default=False, action="store_true", help="symmetric act quant")
 
     args = parser.parse_args()
     random.seed(args.seed)
@@ -295,7 +297,7 @@ def main():
     args.act_quant_params = {
         "n_bits":  args.abits,
         "per_channel_axes": [],
-        "symmetric": False,
+        "symmetric": args.act_symmetric,
         "dynamic_method": args.a_dynamic_method,
     }
     args.q_quant_params = {

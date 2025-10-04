@@ -273,8 +273,11 @@ def omniquant(
         set_quant_state(qlayer, weight_quant=False, act_quant=True)  # weight will be manually quantized before forward
         qlayer.let = args.let
         use_shift = True 
-        if is_llama or is_rwkv7 or args.abits == 16:
+        if is_llama or args.abits == 16:
             use_shift = False                   # deactivate channel-wise shifting for llama model and weight-only quantization
+        elif is_rwkv7:
+            use_shift = args.use_smooth_shift
+        
         if args.let:
             # init channel-wise scaling and shift
             if is_rwkv7:
