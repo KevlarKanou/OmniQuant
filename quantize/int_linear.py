@@ -101,3 +101,33 @@ class QuantLoRA(nn.Module):
         out = self.lora(x)
         return out
 
+class SmoothLinear(nn.Module):
+    """
+    No quantization, only smooth
+    """
+    def __init__(
+        self,
+        org_module: nn.Linear,
+    ):
+        super().__init__()
+        self.fwd_kwargs = dict()
+        self.fwd_func = F.linear
+        self.register_buffer('weight',org_module.weight)
+        if org_module.bias is not None:
+            self.register_buffer('bias',org_module.bias)
+        else:
+            self.bias = None
+        self.in_features = org_module.in_features
+        self.out_features = org_module.out_features
+
+        self.use_temporary_parameter = False
+    
+    def forward(self, input: torch.Tensor):
+        if self.use_temporary_parameter:
+            weight = self.temp_weight
+            bias = self.temp_bias
+        else:
+            weight = self.weight
+            bias = self.bias        
+        out = self.fwd_func(input, weight, bias, **self.fwd_kwargs)
+        return out

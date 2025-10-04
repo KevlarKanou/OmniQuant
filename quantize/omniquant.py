@@ -3,7 +3,7 @@ import torch.nn as nn
 from models.int_llama_layer import QuantLlamaDecoderLayer
 from models.int_opt_layer import QuantOPTDecoderLayer
 from models.int_falcon_layer import QuantFalconDecoderLayer
-from quantize.int_linear import QuantLinear
+from quantize.int_linear import QuantLinear, SmoothLinear
 from quantize.omni_norm import OmniLayerNorm
 from fla.layers.rwkv6 import LoRA as rwkvLoRA
 from quantize.int_linear import QuantLoRA
@@ -236,6 +236,10 @@ def omniquant(
                 if isinstance(module, rwkvLoRA) and args.quant_lora:
                     quantlora = QuantLoRA(org_module=module, weight_quant_params=args.weight_quant_params, act_quant_params=args.act_quant_params)
                     add_new_module(name, qlayer, quantlora)
+                if isinstance(module, rwkvLoRA) and "g_lora" in name and args.o_proj_smooth and not args.quant_lora:
+                    smoothlinear = SmoothLinear(module.lora[2])
+                    add_new_module("2", module.lora, smoothlinear)
+                    logger.info(f"replace {name}.lora.2 for o_proj smooth")
         else:
             qlayer = DecoderLayer(lm.model.config, layer, args)
         qlayer = qlayer.to(dev)
@@ -286,7 +290,7 @@ def omniquant(
                     if hasattr(qlayer.attn, "v_lora"):
                         qlayer.register_parameter("lora_v_smooth_scale",torch.nn.Parameter(torch.ones(layer.attn.v_lora.lora[2].in_features,device=dev, dtype=dtype)))
                         qlayer.register_parameter("lora_v_smooth_shift",torch.nn.Parameter(torch.zeros_like(qlayer.lora_v_smooth_scale)))
-                if args.quant_lora and args.o_proj_smooth:
+                if args.o_proj_smooth:
                     qlayer.register_parameter("out_smooth_scale",torch.nn.Parameter(torch.ones(layer.attn.o_proj.in_features,device=dev, dtype=dtype)))
             else:
             # if not is_rwkv7:

@@ -185,7 +185,7 @@ def smooth_and_quant_inplace(model, args, isllama, isrwkv7, is_lm_head=False, lm
                         smooth_fc_fc_inplace(model.attn.v_lora.lora[0],model.attn.v_lora.lora[2],
                             model.lora_v_smooth_scale, model.lora_v_smooth_shift)
                 
-                if args.quant_lora and args.o_proj_smooth:
+                if args.o_proj_smooth:
                     smooth_fc_fc_inplace(model.attn.g_lora.lora[2],model.attn.o_proj,
                         model.out_smooth_scale)
 
